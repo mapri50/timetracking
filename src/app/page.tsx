@@ -12,6 +12,7 @@ type Customer = {
 type TimeEntry = {
   id: string;
   customerId: string;
+  hourlyRate: number;
   startIso: string;
   endIso: string;
   description: string;
@@ -89,6 +90,7 @@ function normalizeImportedData(raw: unknown): AppData | null {
     .filter((item): item is Customer => item !== null);
 
   const customerIds = new Set(customers.map((customer) => customer.id));
+  const customerRates = new Map(customers.map((customer) => [customer.id, customer.hourlyRate]));
 
   const entries = candidate.entries
     .map((item) => {
@@ -111,6 +113,10 @@ function normalizeImportedData(raw: unknown): AppData | null {
       return {
         id: value.id,
         customerId: value.customerId,
+        hourlyRate:
+          typeof value.hourlyRate === "number"
+            ? value.hourlyRate
+            : (customerRates.get(value.customerId) ?? 0),
         startIso: value.startIso,
         endIso: value.endIso,
         description: value.description,
@@ -216,12 +222,20 @@ export default function Home() {
     return map;
   }, [data.customers]);
 
+  const customerRates = useMemo(() => {
+    const map = new Map<string, number>();
+    data.customers.forEach((customer) => map.set(customer.id, customer.hourlyRate));
+    return map;
+  }, [data.customers]);
+
   const customerOverview = useMemo(() => {
     return data.customers.map((customer) => {
       const trackedHours = data.entries
         .filter((entry) => entry.customerId === customer.id)
         .reduce((sum, entry) => sum + getDurationHours(entry), 0);
-      const totalBilled = trackedHours * customer.hourlyRate;
+      const totalBilled = data.entries
+        .filter((entry) => entry.customerId === customer.id)
+        .reduce((sum, entry) => sum + getDurationHours(entry) * entry.hourlyRate, 0);
       const totalPaid = data.payments
         .filter((payment) => payment.customerId === customer.id)
         .reduce((sum, payment) => sum + payment.amount, 0);
@@ -275,6 +289,7 @@ export default function Home() {
 
     setPendingEntry({
       customerId: timerCustomerId,
+      hourlyRate: customerRates.get(timerCustomerId) ?? 0,
       description: "",
       startIso: timerStartIso,
       endIso: new Date().toISOString(),
@@ -581,7 +596,12 @@ export default function Home() {
                     <select
                       className={styles.input}
                       value={entry.customerId}
-                      onChange={(event) => updateEntry(entry.id, { customerId: event.target.value })}
+                      onChange={(event) =>
+                        updateEntry(entry.id, {
+                          customerId: event.target.value,
+                          hourlyRate: customerRates.get(event.target.value) ?? 0,
+                        })
+                      }
                     >
                       {data.customers.map((customer) => (
                         <option key={customer.id} value={customer.id}>
@@ -593,6 +613,19 @@ export default function Home() {
                   <label>
                     Duration
                     <p className={styles.meta}>{getDurationHours(entry).toFixed(2)}h</p>
+                  </label>
+                  <label>
+                    Rate (€ / hour)
+                    <input
+                      className={styles.input}
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={entry.hourlyRate}
+                      onChange={(event) =>
+                        updateEntry(entry.id, { hourlyRate: Number(event.target.value) || 0 })
+                      }
+                    />
                   </label>
                   <label>
                     Start
